@@ -1,0 +1,21 @@
+{
+  "name": "figma-bridge",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Local bridge that lets an AI agent run Figma Plugin API scripts through a development plugin.",
+  "type": "module",
+  "scripts": {
+    "start": "node src/daemon.js",
+    "mcp": "node src/mcp.js",
+    "token": "node src/cli.js token",
+    "status": "node src/cli.js status"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.32.1",
+    "ws": "^8.22.0",
+    "zod": "^4.6.5"
+  }
+}

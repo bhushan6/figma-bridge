@@ -1,0 +1,133 @@
+<style>
+  body {
+    font: 12px/1.4 Inter, system-ui, sans-serif;
+    margin: 0;
+    padding: 12px;
+    color: var(--figma-color-text);
+    background: var(--figma-color-bg);
+  }
+  .row { display: flex; gap: 6px; margin-bottom: 10px; }
+  input {
+    flex: 1;
+    min-width: 0;
+    padding: 6px 8px;
+    border: 1px solid var(--figma-color-border);
+    border-radius: 4px;
+    background: var(--figma-color-bg);
+    color: var(--figma-color-text);
+  }
+  button {
+    padding: 6px 10px;
+    border: 0;
+    border-radius: 4px;
+    background: var(--figma-color-bg-brand);
+    color: var(--figma-color-text-onbrand);
+    cursor: pointer;
+  }
+  #status { display: flex; align-items: center; gap: 6px; font-weight: 600; }
+  #dot { width: 8px; height: 8px; border-radius: 50%; background: var(--figma-color-icon-tertiary); }
+  #dot.on { background: var(--figma-color-bg-success); }
+  #dot.bad { background: var(--figma-color-bg-danger); }
+  #detail { margin-top: 6px; color: var(--figma-color-text-secondary); }
+  #log { margin-top: 6px; color: var(--figma-color-text-tertiary); white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+</style>
+
+<div class="row">
+  <input id="token" type="password" placeholder="Bridge token" autocomplete="off" />
+  <button id="connect">Connect</button>
+</div>
+<div id="status"><span id="dot"></span><span id="label">Not connected</span></div>
+<div id="detail">Start the bridge, paste the token, then Connect.</div>
+<div id="log"></div>
+
+<script>
+  var URL_ = "ws://localhost:3055";
+  var socket = null;
+  var token = "";
+  var fileName = "";
+  var retryTimer = null;
+  var badToken = false;
+  var handled = 0;
+
+  var $ = function (id) { return document.getElementById(id); };
+
+  function setStatus(state, label, detail) {
+    $("dot").className = state;
+    $("label").textContent = label;
+    if (detail !== undefined) $("detail").textContent = detail;
+  }
+
+  function toMain(msg) {
+    parent.postMessage({ pluginMessage: msg }, "*");
+  }
+
+  function scheduleRetry() {
+    clearTimeout(retryTimer);
+    if (!badToken && token) retryTimer = setTimeout(connect, 2000);
+  }
+
+  function connect() {
+    clearTimeout(retryTimer);
+    if (!token) {
+      setStatus("bad", "No token", "Paste the token from `npm run token`.");
+      return;
+    }
+    if (socket) socket.close();
+    badToken = false;
+    setStatus("", "Connecting…", URL_);
+
+    var ws = new WebSocket(URL_);
+    socket = ws;
+
+    ws.onopen = function () {
+      ws.send(JSON.stringify({ type: "hello", token: token, fileName: fileName }));
+    };
+
+    ws.onmessage = function (event) {
+      var msg = JSON.parse(event.data);
+      if (msg.type === "welcome") {
+        setStatus("on", "Connected", "Agent can now edit: " + fileName);
+      } else if (msg.type === "error") {
+        badToken = true;
+        setStatus("bad", "Rejected", msg.error);
+      } else if (msg.type === "rpc") {
+        $("log").textContent = "→ " + msg.method;
+        toMain(msg);
+      }
+    };
+
+    ws.onclose = function (event) {
+      if (socket !== ws) return;
+      socket = null;
+      if (event.code === 4000) {
+        setStatus("bad", "Disconnected", "Another file connected to the bridge. Click Connect to take it back.");
+        return;
+      }
+      if (!badToken) setStatus("", "Waiting for bridge…", "Retrying every 2 s. Is `npm start` (or the MCP server) running?");
+      scheduleRetry();
+    };
+  }
+
+  window.onmessage = function (event) {
+    var msg = event.data.pluginMessage;
+    if (!msg) return;
+    if (msg.type === "token") {
+      token = msg.token;
+      fileName = msg.fileName;
+      $("token").value = token;
+      if (token) connect();
+    } else if (msg.type === "rpc-result") {
+      handled += 1;
+      $("log").textContent = (msg.ok ? "✓" : "✗") + " " + handled + " request" + (handled === 1 ? "" : "s") + " handled";
+      if (socket && socket.readyState === WebSocket.OPEN) socket.send(JSON.stringify(msg));
+    }
+  };
+
+  $("connect").onclick = function () {
+    token = $("token").value.trim();
+    toMain({ type: "set-token", token: token });
+    connect();
+  };
+
+  toMain({ type: "get-token" });
+</script>
